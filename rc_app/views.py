@@ -10,14 +10,16 @@ from .permissions import JWTAuthentication
 from django.shortcuts import  redirect,render
 
 
-
 class CreateTeamView(generics.CreateAPIView):
     serializer_class = TeamSerializer
 
-class LoginView(generics.CreateAPIView):
+class LoginView(generics.ListCreateAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
-
+    def get(self, request):
+        print("abcd" ,JWTAuthentication.has_permission)
+        if JWTAuthentication.has_permission:
+            return redirect('get_question')
     def create(self, request):
         username = request.data.get('username')
         password = request.data.get('password')
@@ -26,7 +28,7 @@ class LoginView(generics.CreateAPIView):
         user = self.get_queryset().filter(username=username).first()
         try :
             team = Team.objects.get(teamname= team_name )
-         
+            
             if team.login_status :
                 raise AuthenticationFailed('Another User is Logged-In !!')
             else :
@@ -49,6 +51,7 @@ class LoginView(generics.CreateAPIView):
         response = Response()
         response.set_cookie(key='jwt', value=token, httponly=True)
         response.data = {'jwt': token}
+        print("abcd")
         return response
 
 
@@ -87,7 +90,7 @@ class GetQuestionView(generics.ListCreateAPIView):
 
     
     def post(self,request):
-        answer = request.data.get("answer")
+        answer = int(request.data.get("answer"))
         team  = request.data.get("team")
         try:
             team = Team.objects.get(Q(user1=request.user) | Q(user2=request.user))
@@ -122,7 +125,26 @@ class LeaderboardView(generics.ListAPIView):
     serializer_class = ProgressSerializer
     permission_classes = [JWTAuthentication]
 
-
+class result(generics.ListAPIView):
+    def get(self,request):
+        token = request.COOKIES.get('jwt')
+        if not token:
+            raise AuthenticationFailed("Authentication credentials were not provided.")
+        team = None
+        score=0
+        try:
+            payload = jwt.decode(token, 'secret', algorithms=["HS256"])
+            team_name = payload['team']
+            team = Team.objects.get(teamname= team_name)
+            progress=Progress.objects.get(team=team)
+            return Response({'Score':progress.score})
+        except jwt.ExpiredSignatureError:
+            raise AuthenticationFailed("Token has expired")
+        except jwt.InvalidTokenError:
+            raise AuthenticationFailed("Invalid token")
+        except Team.DoesNotExist:
+            raise AuthenticationFailed("User does not exist")
+        
 class LogoutView(views.APIView):
     def get(self,request):
         token = request.COOKIES.get('jwt')
