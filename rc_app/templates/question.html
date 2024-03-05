@@ -7,22 +7,88 @@
 </head>
 <body>
     <h1>RC</h1>
+    <div id="countdown" style="font-weight:700;">
+        {{  hours }} <span>:</span>
+        {{ minutes }} <span>:</span>
+        {{ seconds }}</div>
+    </div>
+
     <form action="{% url 'get_question' %}" method="post">
         {% csrf_token %}
         <p>Question No: {{Current_Question}}<p>
         <p>{{ question }}</p>
-      
         <input type="text" name = "team" value="{{team}}" hidden>
         {% if attempts == 2 %}
         <input type="number" name="answer" required>
-        <input type="number" name="answer" required  disabled>
+        <input type="number" name="answer2" required  disabled>
         {%else %}
-        <input type="number" name="answer"  value="{{ prev_ans }}" disabled>
+        <input type="number" name="answer2"  value="{{ prev_ans }}" disabled>
         <input type="number" name="answer" required >
         {% endif %}
         
         <input type="submit" value="Submit">
        <p>Attempts Available :{{attempts}} </p> 
     </form>
+
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+    <script>
+        var lifeline_flag = "{{lifeline_flag}}".trim()
+        function updateTimer() {    
+            var hours = parseInt(document.getElementById('countdown').textContent.split(':')[0]);
+            var minutes = parseInt(document.getElementById('countdown').textContent.split(':')[1]);
+            var seconds = parseInt(document.getElementById('countdown').textContent.split(':')[2]);
+    
+            if (seconds > 0) {
+                seconds--;
+            } else {
+                if (minutes > 0) {
+                    minutes--;
+                    seconds = 59;
+                } else {
+                    if (hours > 0) {
+                        hours--;
+                        minutes = 59;
+                        seconds = 59;
+                    } else {
+                        window.location.href = "result";
+                    }
+                }
+            }
+    
+            document.getElementById('countdown').textContent =
+                (hours < 10 ? '0' : '') + hours + ' : ' +
+                (minutes < 10 ? '0' : '') + minutes + ' : ' +
+                (seconds < 10 ? '0' : '') + seconds;
+        }
+            
+        
+        function run(){
+                if( lifeline_flag == "3") {
+                    function fetchdata(){
+                    $.ajax({ 
+                        url: "lifeline?lifeline=time_freeze", 
+                        type: 'get', 
+                        success: function(response){
+                            console.log(response)
+                            if (response.seconds == -1){
+                                location.reload();
+                            }
+                            $('#countdown').html(
+                                (response.hours < 10 ? '0' : '') + response.hours + ' : ' +
+                                (response.minutes < 10 ? '0' : '') + response.minutes + ' : ' +
+                                (response.seconds < 10 ? '0' : '') + response.seconds
+                            );
+
+                        } 
+                    }); 
+                } 
+            setInterval(fetchdata,1000); 
+            }else{
+            setInterval(updateTimer, 1000);
+            }
+        }
+        run();
+
+    </script>   
 </body>
 </html>

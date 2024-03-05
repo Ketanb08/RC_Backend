@@ -1,3 +1,4 @@
+#Reset lifeline after submit
 from rest_framework import generics, status,views
 from rest_framework.response import Response
 from django.db.models import Q
@@ -8,29 +9,29 @@ import jwt,datetime,random
 from rest_framework.exceptions import AuthenticationFailed
 from .permissions import JWTAuthentication
 from django.shortcuts import  redirect,render
+from django.utils import timezone
+from . import MarkingScheme,Timer,lifelines
 
 
 class CreateTeamView(generics.CreateAPIView):
     serializer_class = TeamSerializer
 
-class LoginView(generics.ListCreateAPIView):
+
+class LoginView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    def get(self, request):
-        print("abcd" ,JWTAuthentication.has_permission)
-        if JWTAuthentication.has_permission:
-            return redirect('get_question')
+
     def create(self, request):
         username = request.data.get('username')
         password = request.data.get('password')
         team_name = request.data.get('team')
         team = None
-        user = self.get_queryset().filter(username=username).first()
+        user = self.get_queryset().filter(username=username).first()        
         try :
-            team = Team.objects.get(teamname= team_name )
-            
+            team = Team.objects.get(teamname = team_name)
+         
             if team.login_status :
-                raise AuthenticationFailed('Another User is Logged-In !!')
+                    raise AuthenticationFailed('Another User is Logged-In !!')
             else :
                 team.login_status = True
                 team.save()
@@ -51,16 +52,19 @@ class LoginView(generics.ListCreateAPIView):
         response = Response()
         response.set_cookie(key='jwt', value=token, httponly=True)
         response.data = {'jwt': token}
-        print("abcd")
         return response
-
+    
+    def get(self,request):
+        if(JWTAuthentication.has_permission(self,request)):
+           return redirect('get_question')
+        
 
 class GetQuestionView(generics.ListCreateAPIView):
     queryset = Question.objects.none()
     permission_classes = [JWTAuthentication]
     serializer_class = QuestionSerializer
 
-    def get(self, request): 
+    def get(self, request):
         try:
             team = Team.objects.get(Q(user1=request.user) | Q(user2=request.user))
         except Team.DoesNotExist:
@@ -69,8 +73,14 @@ class GetQuestionView(generics.ListCreateAPIView):
         progress, created = Progress.objects.get_or_create(team=team)
 
         if  created or not progress.question_list :
-            q_list = str(random.sample(range(1,6),5) + random.sample(range(6,11),5)).strip("[]")
+            if (team.category == 'JR'):
+                q_list = str(random.sample(range(1,6),5) + random.sample(range(6,11),5)).strip("[]")
+            else :
+                q_list = str(random.sample(range(11,16),5) + random.sample(range(16,21),5)).strip("[]")
+
             progress.question_list = q_list
+            progress.start_time = timezone.now()
+            progress.end_time = timezone.now() + timezone.timedelta(hours=2)
             progress.save()
         if (progress.current_question == 10) :
             return Response({"message": "Questions are over"}, status=status.HTTP_404_NOT_FOUND)
@@ -78,19 +88,32 @@ class GetQuestionView(generics.ListCreateAPIView):
         questions_data = (progress.question_list).split(',')
         que_id = questions_data[progress.current_question-1]
         question = Question.objects.get(question_id = que_id)
+
+        if (progress.lifeline_flag == 3):
+            time_delta = ((timezone.now() - progress.start_time).total_seconds())//10
+            time_remaining = progress.end_time - progress.start_time - timezone.timedelta(seconds=time_delta)
+        else :
+            time_remaining = (progress.end_time - timezone.now())
+        
+        time_data = Timer.Timer(time_remaining)
         
         context = {
             "Current_Question" : progress.current_question,
             "question" : question.question_text,
             "team" : progress.team,
             "attempts" : 2 - progress.isAttemptedFirst,
-            "prev_ans" : progress.prev_answer
+            "prev_ans" : progress.prev_answer,
+            "lifeline_flag" : progress.lifeline_flag,
         }
+
+        context.update(time_data)
+
         return render(request, 'question.html', context)
 
     
     def post(self,request):
-        answer = int(request.data.get("answer"))
+        answer = request.data.get("answer")
+        answer = int(answer)
         team  = request.data.get("team")
         try:
             team = Team.objects.get(Q(user1=request.user) | Q(user2=request.user))
@@ -105,18 +128,12 @@ class GetQuestionView(generics.ListCreateAPIView):
         question = Question.objects.get(question_id = que_id)
 
         if (answer == question.correct_answer):
-            progress.score +=1
-            progress.current_question+=1
-            progress.isAttemptedFirst = False
+            MarkingScheme.evaluate_postive(progress)
         else :
-            progress.prev_answer = answer
-            if ( not progress.isAttemptedFirst):
-                progress.isAttemptedFirst = True
-            else:
-                progress.isAttemptedFirst = False
-                progress.current_question+=1
+            MarkingScheme.evaluate_negative(progress,answer)
+        lifelines.save_response(question,answer)
+        lifelines.reset_lifelines(progress) 
         progress.save()
-
         return redirect('get_question')
         
 
@@ -125,26 +142,7 @@ class LeaderboardView(generics.ListAPIView):
     serializer_class = ProgressSerializer
     permission_classes = [JWTAuthentication]
 
-class result(generics.ListAPIView):
-    def get(self,request):
-        token = request.COOKIES.get('jwt')
-        if not token:
-            raise AuthenticationFailed("Authentication credentials were not provided.")
-        team = None
-        score=0
-        try:
-            payload = jwt.decode(token, 'secret', algorithms=["HS256"])
-            team_name = payload['team']
-            team = Team.objects.get(teamname= team_name)
-            progress=Progress.objects.get(team=team)
-            return Response({'Score':progress.score})
-        except jwt.ExpiredSignatureError:
-            raise AuthenticationFailed("Token has expired")
-        except jwt.InvalidTokenError:
-            raise AuthenticationFailed("Invalid token")
-        except Team.DoesNotExist:
-            raise AuthenticationFailed("User does not exist")
-        
+
 class LogoutView(views.APIView):
     def get(self,request):
         token = request.COOKIES.get('jwt')
@@ -171,3 +169,26 @@ class LogoutView(views.APIView):
             'message' : 'Logged Out!',
         }
         return response
+    
+
+class ResultView(generics.ListAPIView):
+    def get(self,request):
+        token = request.COOKIES.get('jwt')
+        if not token:
+            raise AuthenticationFailed("Authentication credentials were not provided.")
+        team = None
+        try:
+            payload = jwt.decode(token, 'secret', algorithms=["HS256"])
+            team_name = payload['team']
+            team = Team.objects.get(teamname= team_name)
+            progress = Progress.objects.get(team = team)
+            return Response({"Score" : progress.score  })
+        except jwt.ExpiredSignatureError:
+            raise AuthenticationFailed("Token has expired")
+        except jwt.InvalidTokenError:
+            raise AuthenticationFailed("Invalid token")
+        except Team.DoesNotExist:
+            raise AuthenticationFailed("User does not exist")
+        except Progress.DoesNotExist:
+            raise AuthenticationFailed("Progress does not exist")
+           
