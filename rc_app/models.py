@@ -23,8 +23,8 @@ class Team(models.Model):
 class Progress(models.Model):
     team = models.OneToOneField(Team, on_delete=models.CASCADE, related_name='progress')  
     score = models.IntegerField(default = 0)
-    start_time = models.DateTimeField(default  = timezone.now())
-    end_time = models.DateTimeField(default  = timezone.now()) 
+    start_time = models.DateTimeField(blank =True)
+    end_time = models.DateTimeField(blank =True ) 
     current_question = models.IntegerField(default=1)
     question_list = models.CharField(max_length = 256)
     prev_answer = models.IntegerField(default = 0)
@@ -32,4 +32,7 @@ class Progress(models.Model):
     lifeline1=models.BooleanField(default=False)
     lifeline2=models.BooleanField(default=False)
     lifeline3=models.BooleanField(default=False)
-    lifeline_flag = models.IntegerField(default = 1)
+    lifeline_flag = models.SmallIntegerField(default = 1)
+
+    def __str__(self):
+            return (self.team.teamname)
